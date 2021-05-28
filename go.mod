@@ -5,6 +5,7 @@ go 1.16
 require (
 	github.com/containerd/cgroups v1.0.1
 	github.com/containerd/containerd v1.5.2
+	github.com/containerd/fifo v1.0.0
 	github.com/containerd/go-runc v1.0.0
 	github.com/containerd/typeurl v1.0.2
 	github.com/gogo/protobuf v1.3.2

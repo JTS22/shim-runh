@@ -31,6 +31,7 @@ import (
 	eventstypes "github.com/containerd/containerd/api/events"
 	"github.com/containerd/containerd/api/types/task"
 	"github.com/containerd/containerd/errdefs"
+	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/namespaces"
 	"github.com/containerd/containerd/pkg/oom"
@@ -44,6 +45,7 @@ import (
 	"github.com/containerd/containerd/runtime/v2/shim"
 	taskAPI "github.com/containerd/containerd/runtime/v2/task"
 	"github.com/containerd/containerd/sys/reaper"
+	"github.com/containerd/fifo"
 	runcC "github.com/containerd/go-runc"
 	"github.com/containerd/typeurl"
 	"github.com/gogo/protobuf/proto"
@@ -169,6 +171,17 @@ func readSpec() (*spec, error) {
 }
 
 func (s *service) StartShim(ctx context.Context, opts shim.StartOpts) (_ string, retErr error) {
+	logFifo, err := fifo.OpenFifo(ctx, "log", unix.O_WRONLY, 0200)
+	if err != nil {
+		return "", err
+	}
+
+	logrus.SetOutput(logFifo)
+
+	log := log.G(ctx).WithField("task_id", opts.ID)
+	log.Logger.SetLevel(logrus.DebugLevel)
+	log.Debug("Starting runh shim!")
+
 	cmd, err := newCommand(ctx, opts.ID, opts.ContainerdBinary, opts.Address, opts.TTRPCAddress)
 	if err != nil {
 		return "", err
