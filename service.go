@@ -40,7 +40,6 @@ import (
 	"github.com/containerd/containerd/pkg/process"
 	"github.com/containerd/containerd/pkg/stdio"
 	"github.com/containerd/containerd/pkg/userns"
-	"github.com/containerd/containerd/runtime/v2/runc"
 	"github.com/containerd/containerd/runtime/v2/runc/options"
 	"github.com/containerd/containerd/runtime/v2/shim"
 	taskAPI "github.com/containerd/containerd/runtime/v2/task"
@@ -53,6 +52,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
+
+	runh "github.com/JTS22/shim-runh/runtime"
 )
 
 var (
@@ -61,10 +62,10 @@ var (
 )
 
 // group labels specifies how the shim groups services.
-// currently supports a runc.v2 specific .group label and the
+// currently supports a runh.v2 specific .group label and the
 // standard k8s pod label.  Order matters in this list
 var groupLabels = []string{
-	"io.containerd.runc.v2.group",
+	"io.containerd.runh.v2.group",
 	"io.kubernetes.cri.sandbox-id",
 }
 
@@ -94,7 +95,7 @@ func New(ctx context.Context, id string, publisher shim.Publisher, shutdown func
 		ec:         reaper.Default.Subscribe(),
 		ep:         ep,
 		cancel:     shutdown,
-		containers: make(map[string]*runc.Container),
+		containers: make(map[string]*runh.Container),
 	}
 	go s.processExits()
 	runcC.Monitor = reaper.Default
@@ -124,7 +125,7 @@ type service struct {
 	// id only used in cleanup case
 	id string
 
-	containers map[string]*runc.Container
+	containers map[string]*runh.Container
 
 	shimAddress string
 	cancel      func()
@@ -309,11 +310,11 @@ func (s *service) Cleanup(ctx context.Context) (*taskAPI.DeleteResponse, error) 
 	if err != nil {
 		return nil, err
 	}
-	runtime, err := runc.ReadRuntime(path)
+	runtime, err := runh.ReadRuntime(path)
 	if err != nil {
 		return nil, err
 	}
-	opts, err := runc.ReadOptions(path)
+	opts, err := runh.ReadOptions(path)
 	if err != nil {
 		return nil, err
 	}
@@ -342,7 +343,9 @@ func (s *service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	container, err := runc.NewContainer(ctx, s.platform, r)
+	log.G(ctx).Info("Creating new runh container!")
+
+	container, err := runh.NewContainer(ctx, s.platform, r)
 	if err != nil {
 		return nil, err
 	}
@@ -456,25 +459,27 @@ func (s *service) Delete(ctx context.Context, r *taskAPI.DeleteRequest) (*taskAP
 
 // Exec an additional process inside the container
 func (s *service) Exec(ctx context.Context, r *taskAPI.ExecProcessRequest) (*ptypes.Empty, error) {
-	container, err := s.getContainer(r.ID)
-	if err != nil {
-		return nil, err
-	}
-	ok, cancel := container.ReserveProcess(r.ExecID)
-	if !ok {
-		return nil, errdefs.ToGRPCf(errdefs.ErrAlreadyExists, "id %s", r.ExecID)
-	}
-	process, err := container.Exec(ctx, r)
-	if err != nil {
-		cancel()
-		return nil, errdefs.ToGRPC(err)
-	}
+	return nil, errdefs.ToGRPCf(errdefs.ErrNotImplemented, "Runh does not support execution of additional processes")
 
-	s.send(&eventstypes.TaskExecAdded{
-		ContainerID: container.ID,
-		ExecID:      process.ID(),
-	})
-	return empty, nil
+	// container, err := s.getContainer(r.ID)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// ok, cancel := container.ReserveProcess(r.ExecID)
+	// if !ok {
+	// 	return nil, errdefs.ToGRPCf(errdefs.ErrAlreadyExists, "id %s", r.ExecID)
+	// }
+	// process, err := container.Exec(ctx, r)
+	// if err != nil {
+	// 	cancel()
+	// 	return nil, errdefs.ToGRPC(err)
+	// }
+
+	// s.send(&eventstypes.TaskExecAdded{
+	// 	ContainerID: container.ID,
+	// 	ExecID:      process.ID(),
+	// })
+	// return empty, nil
 }
 
 // ResizePty of a process
@@ -765,7 +770,7 @@ func (s *service) checkProcesses(e runcC.Exit) {
 
 			if ip, ok := p.(*process.Init); ok {
 				// Ensure all children are killed
-				if runc.ShouldKillAllOnExit(s.context, container.Bundle) {
+				if runh.ShouldKillAllOnExit(s.context, container.Bundle) {
 					if err := ip.KillAll(s.context); err != nil {
 						logrus.WithError(err).WithField("id", ip.ID()).
 							Error("failed to kill init's children")
@@ -811,7 +816,7 @@ func (s *service) forward(ctx context.Context, publisher shim.Publisher) {
 	ns, _ := namespaces.Namespace(ctx)
 	ctx = namespaces.WithNamespace(context.Background(), ns)
 	for e := range s.events {
-		err := publisher.Publish(ctx, runc.GetTopic(e), e)
+		err := publisher.Publish(ctx, runh.GetTopic(e), e)
 		if err != nil {
 			logrus.WithError(err).Error("post event")
 		}
@@ -819,7 +824,7 @@ func (s *service) forward(ctx context.Context, publisher shim.Publisher) {
 	publisher.Close()
 }
 
-func (s *service) getContainer(id string) (*runc.Container, error) {
+func (s *service) getContainer(id string) (*runh.Container, error) {
 	s.mu.Lock()
 	container := s.containers[id]
 	s.mu.Unlock()
@@ -835,7 +840,7 @@ func (s *service) initPlatform() error {
 	if s.platform != nil {
 		return nil
 	}
-	p, err := runc.NewPlatform()
+	p, err := runh.NewPlatform()
 	if err != nil {
 		return err
 	}
